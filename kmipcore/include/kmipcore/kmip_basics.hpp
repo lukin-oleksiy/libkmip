@@ -1,0 +1,194 @@
+#pragma once
+
+#include "kmipcore/kmip_enums.hpp"
+
+#include <cstdint>
+#include <memory>
+#include <span>
+#include <stdexcept>
+#include <string>
+#include <variant>
+#include <vector>
+
+// Forward declaration for SerializationBuffer
+namespace kmipcore {
+  class SerializationBuffer;
+}
+
+namespace kmipcore {
+
+  /** @brief Alias of KMIP tag enumeration type used by TTLV elements. */
+  using Tag = ::tag;
+  /** @brief Alias of KMIP type enumeration used by TTLV elements. */
+  using Type = ::type;
+
+  struct Element;  // Forward declaration
+
+  /** @brief TTLV Integer wrapper. */
+  struct Integer {
+    int32_t value;
+  };
+  /** @brief TTLV Long Integer wrapper. */
+  struct LongInteger {
+    int64_t value;
+  };
+  /** @brief TTLV Big Integer wrapper. */
+  struct BigInteger {
+    std::vector<uint8_t> value;
+  };
+  /** @brief TTLV Enumeration wrapper. */
+  struct Enumeration {
+    int32_t value;
+  };
+  /** @brief TTLV Boolean wrapper. */
+  struct Boolean {
+    bool value;
+  };  // usually uint64_t 0/1 in TTLV, but bool is fine in abstract
+      // representation
+  /** @brief TTLV Text String wrapper. */
+  struct TextString {
+    std::string value;
+  };
+  /** @brief TTLV Byte String wrapper. */
+  struct ByteString {
+    std::vector<uint8_t> value;
+  };
+  /** @brief TTLV Date-Time wrapper (POSIX time). */
+  struct DateTime {
+    int64_t value;
+  };  // 64-bit signed integer POSIX time
+  /** @brief TTLV Interval wrapper (seconds). */
+  struct Interval {
+    uint32_t value;
+  };  // 32-bit unsigned integer
+
+  /**
+   * @brief TTLV Structure wrapper containing nested elements.
+   */
+  struct Structure {
+    std::vector<std::shared_ptr<Element>> items;
+
+    /** @brief Appends a child element to the structure. */
+    void add(const std::shared_ptr<Element> &element) { items.push_back(element); }
+
+    /** @brief Finds the first child with the specified tag. */
+    [[nodiscard]] std::shared_ptr<Element> find(Tag tag) const;
+    /** @brief Finds all children with the specified tag. */
+    [[nodiscard]] std::vector<std::shared_ptr<Element>> findAll(Tag tag) const;
+  };
+
+  /** @brief Variant that represents any supported KMIP TTLV value type. */
+  using Value = std::variant<
+      Structure,
+      Integer,
+      LongInteger,
+      BigInteger,
+      Enumeration,
+      Boolean,
+      TextString,
+      ByteString,
+      DateTime,
+      Interval>;
+
+  /**
+   * @brief Generic TTLV node containing tag, type, and typed value.
+   */
+  struct Element {
+    /** KMIP tag describing semantic meaning of this node. */
+    Tag tag = static_cast<Tag>(KMIP_TAG_DEFAULT);
+    /** KMIP TTLV type code for @ref value. */
+    Type type = static_cast<Type>(KMIP_TYPE_STRUCTURE);
+    /** Typed payload value of this node. */
+    Value value = Structure{};
+
+    /**
+     * @brief Constructs a TTLV element with explicit fields.
+     */
+    Element(Tag t, Type tp, Value v) : tag(t), type(tp), value(std::move(v)) {}
+    /** @brief Default-constructs an empty element. */
+    Element()
+      : tag(static_cast<Tag>(KMIP_TAG_DEFAULT)),
+        type(static_cast<Type>(KMIP_TYPE_STRUCTURE)),
+        value(Structure{}) {}
+
+    /** @brief Creates a Structure element. */
+    static std::shared_ptr<Element> createStructure(Tag t);
+    /** @brief Creates an Integer element. */
+    static std::shared_ptr<Element> createInteger(Tag t, int32_t v);
+    /** @brief Creates a Long Integer element. */
+    static std::shared_ptr<Element> createLongInteger(Tag t, int64_t v);
+    /** @brief Creates a Big Integer element. */
+    static std::shared_ptr<Element>
+        createBigInteger(Tag t, const std::vector<uint8_t> &v);
+    /** @brief Creates an Enumeration element. */
+    static std::shared_ptr<Element> createEnumeration(Tag t, int32_t v);
+    /** @brief Creates a Boolean element. */
+    static std::shared_ptr<Element> createBoolean(Tag t, bool v);
+    /** @brief Creates a Text String element. */
+    static std::shared_ptr<Element>
+        createTextString(Tag t, const std::string &v);
+    /** @brief Creates a Byte String element. */
+    static std::shared_ptr<Element>
+        createByteString(Tag t, const std::vector<uint8_t> &v);
+    /** @brief Creates a Date-Time element. */
+    static std::shared_ptr<Element> createDateTime(Tag t, int64_t v);
+    /** @brief Creates an Interval element. */
+    static std::shared_ptr<Element> createInterval(Tag t, uint32_t v);
+
+    /**
+     * @brief Serializes this node into the provided TTLV buffer.
+     * @param buf Destination serialization buffer.
+     */
+    void serialize(SerializationBuffer& buf) const;
+
+    /**
+     * @brief Deserializes one element from raw TTLV data.
+     * @param data Input TTLV byte span.
+     * @param offset Current read offset; advanced past parsed element.
+     * @return Parsed element tree rooted at this node.
+     */
+    static std::shared_ptr<Element>
+        deserialize(std::span<const uint8_t> data, size_t &offset);
+
+    /** @brief Returns mutable structure view when this node is a structure. */
+    [[nodiscard]] Structure *asStructure();
+    /** @brief Returns const structure view when this node is a structure. */
+    [[nodiscard]] const Structure *asStructure() const;
+
+    /** @brief Returns first direct child with the given tag, if present. */
+    [[nodiscard]] std::shared_ptr<Element> getChild(Tag tag) const;
+    /** @brief Returns all direct children with the given tag. */
+    [[nodiscard]] std::vector<std::shared_ptr<Element>> getChildren(Tag tag) const;
+
+    /** @brief Converts value to Integer representation. */
+    [[nodiscard]] int32_t toInt() const;
+    /** @brief Converts value to Long Integer representation. */
+    [[nodiscard]] int64_t toLong() const;
+    /** @brief Converts value to Boolean representation. */
+    [[nodiscard]] bool toBool() const;
+    /** @brief Converts value to Text String representation. */
+    [[nodiscard]] std::string toString() const;
+    /** @brief Converts value to Byte String representation. */
+    [[nodiscard]] std::vector<uint8_t> toBytes() const;
+    /** @brief Converts value to Enumeration representation. */
+    [[nodiscard]] int32_t toEnum() const;
+  };
+
+  /**
+   * @brief Base exception for KMIP core protocol/encoding failures.
+   */
+  class KmipException : public std::runtime_error {
+  public:
+    /** @brief Creates an exception with message only. */
+    explicit KmipException(const std::string &msg) : std::runtime_error(msg) {}
+    /** @brief Creates an exception with numeric status code and message. */
+    KmipException(int code, const std::string &msg)
+      : std::runtime_error(msg), code_(code) {}
+    /** @brief Returns optional KMIP/library error code (or -1 if unset). */
+    [[nodiscard]] int code() const noexcept { return code_; }
+
+  private:
+    int code_ = -1;
+  };
+
+}  // namespace kmipcore
