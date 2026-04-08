@@ -45,3 +45,14 @@ add_demo(get)
 add_demo(locate)
 add_demo(register)
 add_demo(query)
+
+if(BUILD_KMIP_TESTS)
+  add_executable(kmip_tests tests.c)
+  target_link_libraries(kmip_tests kmip)
+  if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+    # tests.c includes kmip.h before stdio.h; inject stdio for this target only.
+    target_compile_options(kmip_tests PRIVATE -include stdio.h)
+  endif()
+  add_test(NAME kmip_tests COMMAND kmip_tests)
+endif()
+
