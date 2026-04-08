@@ -6777,14 +6777,84 @@ kmip_free_objects (KMIP *ctx, ObjectTypes *value)
 void
 kmip_free_server_information (KMIP *ctx, ServerInformation *value)
 {
-  kmip_free_text_string (ctx, value->server_name);
-  kmip_free_text_string (ctx, value->server_serial_number);
-  kmip_free_text_string (ctx, value->server_version);
-  kmip_free_text_string (ctx, value->server_load);
-  kmip_free_text_string (ctx, value->product_name);
-  kmip_free_text_string (ctx, value->build_level);
-  kmip_free_text_string (ctx, value->build_date);
-  kmip_free_text_string (ctx, value->cluster_info);
+  if (ctx == NULL || value == NULL)
+    {
+      return;
+    }
+
+  if (value->server_name != NULL)
+    {
+      kmip_free_text_string (ctx, value->server_name);
+      ctx->free_func (ctx->state, value->server_name);
+      value->server_name = NULL;
+    }
+  if (value->server_serial_number != NULL)
+    {
+      kmip_free_text_string (ctx, value->server_serial_number);
+      ctx->free_func (ctx->state, value->server_serial_number);
+      value->server_serial_number = NULL;
+    }
+  if (value->server_version != NULL)
+    {
+      kmip_free_text_string (ctx, value->server_version);
+      ctx->free_func (ctx->state, value->server_version);
+      value->server_version = NULL;
+    }
+  if (value->server_load != NULL)
+    {
+      kmip_free_text_string (ctx, value->server_load);
+      ctx->free_func (ctx->state, value->server_load);
+      value->server_load = NULL;
+    }
+  if (value->product_name != NULL)
+    {
+      kmip_free_text_string (ctx, value->product_name);
+      ctx->free_func (ctx->state, value->product_name);
+      value->product_name = NULL;
+    }
+  if (value->build_level != NULL)
+    {
+      kmip_free_text_string (ctx, value->build_level);
+      ctx->free_func (ctx->state, value->build_level);
+      value->build_level = NULL;
+    }
+  if (value->build_date != NULL)
+    {
+      kmip_free_text_string (ctx, value->build_date);
+      ctx->free_func (ctx->state, value->build_date);
+      value->build_date = NULL;
+    }
+  if (value->cluster_info != NULL)
+    {
+      kmip_free_text_string (ctx, value->cluster_info);
+      ctx->free_func (ctx->state, value->cluster_info);
+      value->cluster_info = NULL;
+    }
+
+  if (value->alternative_failover_endpoints != NULL)
+    {
+      AltEndpoints *alt = value->alternative_failover_endpoints;
+      if (alt->endpoint_list != NULL)
+        {
+          LinkedListItem *curr = kmip_linked_list_pop (alt->endpoint_list);
+          while (curr != NULL)
+            {
+              TextString *endpoint = (TextString *)curr->data;
+              if (endpoint != NULL)
+                {
+                  kmip_free_text_string (ctx, endpoint);
+                  ctx->free_func (ctx->state, endpoint);
+                }
+              curr->data = NULL;
+              ctx->free_func (ctx->state, curr);
+              curr = kmip_linked_list_pop (alt->endpoint_list);
+            }
+          ctx->free_func (ctx->state, alt->endpoint_list);
+          alt->endpoint_list = NULL;
+        }
+      ctx->free_func (ctx->state, alt);
+      value->alternative_failover_endpoints = NULL;
+    }
 }
 
 /*
@@ -12372,6 +12442,10 @@ kmip_encode_response_batch_item (KMIP *ctx, const ResponseBatchItem *value)
 
     case KMIP_OP_REGISTER:
       result = kmip_encode_register_response_payload (ctx, (RegisterResponsePayload *)value->response_payload);
+      break;
+
+    case KMIP_OP_GET:
+      result = kmip_encode_get_response_payload (ctx, (GetResponsePayload *)value->response_payload);
       break;
 
     case KMIP_OP_GET_ATTRIBUTES:

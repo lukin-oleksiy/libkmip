@@ -9788,6 +9788,8 @@ test_encode_query_request_payload (TestTracker *tracker)
   int result = kmip_encode_query_request_payload (&ctx, &qrp);
   result     = report_encoding_test_result (tracker, &ctx, expected, observed, result, __func__);
 
+  kmip_destroy (&ctx);
+
   return (result);
 }
 
