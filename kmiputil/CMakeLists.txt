@@ -3,7 +3,9 @@ project(kmiputil)
 
 set(CMAKE_CXX_STANDARD 20)
 
-find_package(OpenSSL REQUIRED)
+find_package(OpenSSL REQUIRED COMPONENTS Crypto)
+
+include(GNUInstallDirs)
 
 add_library(
   kmiputil
@@ -24,7 +26,7 @@ add_library(
 target_include_directories(
   kmiputil PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
 target_link_libraries(kmiputil PUBLIC kmipclient OpenSSL::Crypto)
@@ -42,14 +44,16 @@ set_target_properties(
 
 export(TARGETS kmipcore kmipclient kmiputil FILE "kmiputil.cmake")
 
-install(
-  TARGETS kmiputil
-  EXPORT kmipclient
-  ARCHIVE DESTINATION lib
-  LIBRARY DESTINATION lib
-)
+if(KMIPCLIENT_INSTALL)
+  install(
+    TARGETS kmiputil
+    EXPORT kmipclient
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  )
 
-install(DIRECTORY include/kmiputil DESTINATION include)
+  install(DIRECTORY include/kmiputil DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+endif()
 
 # Generates an AES key locally and registers it with kmipclient. It lives
 # here, not with kmipclient's examples, so kmipclient builds without kmiputil.
@@ -70,6 +74,8 @@ if(BUILD_TESTS)
 
     # For Windows: Prevent overriding the parent project's compiler/linker settings
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    # Keep googletest out of "cmake --install": only the tests use it.
+    set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(googletest)
   endif()
 

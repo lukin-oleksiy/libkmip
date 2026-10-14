@@ -51,7 +51,19 @@ cmake --build build -j
 ```
 
 To install, add `cmake --install build` (use `-DCMAKE_INSTALL_PREFIX` to
-choose a custom prefix).
+choose a custom prefix). A project using the installed package can then do:
+
+```cmake
+find_package(kmipclient REQUIRED)
+target_link_libraries(your_target PRIVATE kmipclient::kmipclient)
+```
+
+The package also provides `kmipclient::kmiputil` (which pulls in
+`kmipclient::kmipclient`) and `kmipclient::kmipcore`.
+
+Projects that vendor this repository instead (`add_subdirectory`) link the
+plain `kmipcore`/`kmipclient`/`kmiputil` target names. Nothing is installed
+then, unless the parent project sets `KMIPCLIENT_INSTALL=ON`.
 
 ## Tests
 
