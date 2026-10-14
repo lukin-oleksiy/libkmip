@@ -4,8 +4,10 @@ project(kmipclient)
 # Have to put these 2 lines here to compile
 set(CMAKE_CXX_STANDARD 20)
 
-find_package(OpenSSL REQUIRED)
+find_package(OpenSSL REQUIRED COMPONENTS SSL Crypto)
 find_package(Threads REQUIRED)
+
+include(GNUInstallDirs)
 
 add_library(
   kmipclient
@@ -37,7 +39,7 @@ add_library(
 target_include_directories(
   kmipclient PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
 target_link_libraries(kmipclient PUBLIC kmipcore OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
@@ -64,14 +66,16 @@ endif()
 
 export(TARGETS kmipcore kmipclient FILE "kmipclient.cmake")
 
-install(
-  TARGETS kmipclient
-  EXPORT kmipclient
-  DESTINATION cmake
-  ARCHIVE DESTINATION lib
-  PUBLIC_HEADER DESTINATION include/
-  LIBRARY DESTINATION lib
-)
+if(KMIPCLIENT_INSTALL)
+  install(
+    TARGETS kmipclient
+    EXPORT kmipclient
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  )
+
+  install(DIRECTORY include/kmipclient DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+endif()
 
 macro(add_example name)
   add_executable(example_${name} examples/example_${name}.cpp)
@@ -110,6 +114,8 @@ if(BUILD_TESTS)
 
     # For Windows: Prevent overriding the parent project's compiler/linker settings
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    # Keep googletest out of "cmake --install": only the tests use it.
+    set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(googletest)
   endif()
 
