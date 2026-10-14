@@ -195,17 +195,113 @@ namespace kmipcore {
       }
       return key_block;
     }
-    std::shared_ptr<Element> make_key_object_from_key(const Key &key) {
-      const auto alg = key.attributes().algorithm();
+    // Highest Cryptographic Algorithm value a KMIP version defines: for 1.4
+    // and 2.0 from their specs (SHAKE-256, 1.4 §9.1.3.2.13; Ed448, 2.0
+    // §11.12), for earlier ones from the version notes in kmip_enums.hpp
+    // (Twofish in 1.0, EC added in 1.2, One Time Pad in 1.3). Extensions
+    // (8XXXXXXX) are negative as int32_t and always pass.
+    int32_t last_crypto_algorithm(const ProtocolVersion &version) {
+      using algorithm = cryptographic_algorithm;
+      if (version.is_at_least(2, 0)) {
+        return std::numeric_limits<int32_t>::max();
+      }
+      if (version.is_at_least(1, 4)) {
+        return static_cast<int32_t>(algorithm::KMIP_CRYPTOALG_SHAKE_256);
+      }
+      if (version.is_at_least(1, 3)) {
+        return static_cast<int32_t>(algorithm::KMIP_CRYPTOALG_ONE_TIME_PAD);
+      }
+      if (version.is_at_least(1, 2)) {
+        return static_cast<int32_t>(algorithm::KMIP_CRYPTOALG_EC);
+      }
+      return static_cast<int32_t>(algorithm::KMIP_CRYPTOALG_TWOFISH);
+    }
+
+    struct AlgorithmAndLength {
+      int32_t algorithm;
+      int32_t length;
+    };
+
+    // The Cryptographic Algorithm and Length to send for a key on Register,
+    // or nullopt to send neither. In a Key Block they are both present or
+    // both absent (1.4 §2.1.3 Table 7, 2.0 §3.1), and Register's attributes
+    // get the same pair so the two never disagree. Neither is sent when:
+    // - the algorithm is unknown, or not defined in the request's protocol
+    //   version (e.g. Ed25519 over KMIP 1.4, see last_crypto_algorithm());
+    // - the length is unknown. Only a Raw symmetric key's size is its key
+    //   length; for an asymmetric key it is the size of the encoding.
+    // A key encoding such as PKCS#8 or X.509 carries both, so the server can
+    // still tell them (the Key Block rule allows leaving them out then).
+    std::optional<AlgorithmAndLength>
+        algorithm_and_length(const Key &key, const ProtocolVersion &version) {
+      const auto algorithm = static_cast<int32_t>(key.attributes().algorithm());
+      if (algorithm == static_cast<int32_t>(
+                           cryptographic_algorithm::KMIP_CRYPTOALG_UNSET
+                       ) ||
+          algorithm > last_crypto_algorithm(version)) {
+        return std::nullopt;
+      }
+      std::optional<int32_t> length = key.attributes().crypto_length();
+      if (!length && key.type() == KeyType::SYMMETRIC_KEY &&
+          key.value().size() <= static_cast<std::size_t>(
+                                    std::numeric_limits<int32_t>::max() / 8
+                                )) {
+        length = static_cast<int32_t>(key.value().size() * 8);
+      }
+      if (!length || *length <= 0) {
+        return std::nullopt;
+      }
+      return AlgorithmAndLength{algorithm, *length};
+    }
+
+    // Why algorithm_and_length() has nothing to send for a symmetric key,
+    // which Register then refuses.
+    std::string symmetric_key_without_algorithm_and_length(
+        const Key &key, const ProtocolVersion &version
+    ) {
+      const auto algorithm = static_cast<int32_t>(key.attributes().algorithm());
+      if (algorithm ==
+          static_cast<int32_t>(cryptographic_algorithm::KMIP_CRYPTOALG_UNSET)) {
+        return "Cannot register a symmetric key without a Cryptographic "
+               "Algorithm: raw key material does not carry it";
+      }
+      if (algorithm > last_crypto_algorithm(version)) {
+        return "Cannot register a symmetric key with Cryptographic Algorithm " +
+               std::to_string(algorithm) + ", which KMIP " +
+               std::to_string(version.getMajor()) + "." +
+               std::to_string(version.getMinor()) + " does not define";
+      }
+      if (const auto length = key.attributes().crypto_length()) {
+        return "Cannot register a symmetric key with Cryptographic Length " +
+               std::to_string(*length) + ": it must be positive";
+      }
+      if (key.value().empty()) {
+        return "Cannot register a symmetric key without a Cryptographic "
+               "Length (an empty value and no length set)";
+      }
+      return "Cannot register a symmetric key of " +
+             std::to_string(key.value().size()) +
+             " bytes: its length in bits does not fit a Cryptographic Length";
+    }
+
+    std::shared_ptr<Element> make_key_object_from_key(
+        const Key &key, const ProtocolVersion &version
+    ) {
+      const auto pair = algorithm_and_length(key, version);
       const std::optional<int32_t> key_alg =
-          (alg != cryptographic_algorithm::KMIP_CRYPTOALG_UNSET)
-              ? std::optional<int32_t>(static_cast<int32_t>(alg))
-              : std::nullopt;
-      const int32_t key_len = key.attributes().crypto_length().value_or(
-          static_cast<int32_t>(key.value().size() * 8)
-      );
+          pair ? std::optional<int32_t>(pair->algorithm) : std::nullopt;
+      const std::optional<int32_t> key_len =
+          pair ? std::optional<int32_t>(pair->length) : std::nullopt;
       switch (key.type()) {
         case KeyType::SYMMETRIC_KEY: {
+          // Raw key material does not carry its algorithm, so a symmetric
+          // Key Block must (KMIP 1.4 §2.1.3 Table 7, 2.0 §3.1).
+          if (!pair) {
+            throw KmipException(
+                KMIP_INVALID_FIELD,
+                symmetric_key_without_algorithm_and_length(key, version)
+            );
+          }
           auto symmetric_key =
               Element::createStructure(tag::KMIP_TAG_SYMMETRIC_KEY);
           symmetric_key->asStructure()->add(
@@ -410,7 +506,10 @@ namespace kmipcore {
      *        (key) request from a Key object's typed and generic attributes.
      */
     std::shared_ptr<Element> make_v2_register_key_attrs(
-        const std::string &name, const std::string &group, const Key &key
+        const std::string &name,
+        const std::string &group,
+        const Key &key,
+        const ProtocolVersion &version
     ) {
       auto attrs = Element::createStructure(tag::KMIP_TAG_ATTRIBUTES);
       attrs->asStructure()->add(make_v2_name_struct(name));
@@ -419,20 +518,16 @@ namespace kmipcore {
             Element::createTextString(tag::KMIP_TAG_OBJECT_GROUP, group)
         );
       }
-      if (const auto alg = key.attributes().algorithm();
-          alg != cryptographic_algorithm::KMIP_CRYPTOALG_UNSET) {
+      if (const auto pair = algorithm_and_length(key, version)) {
         attrs->asStructure()->add(
             Element::createEnumeration(
-                tag::KMIP_TAG_CRYPTOGRAPHIC_ALGORITHM, static_cast<int32_t>(alg)
+                tag::KMIP_TAG_CRYPTOGRAPHIC_ALGORITHM, pair->algorithm
             )
         );
-      }
-      const int32_t key_len = key.attributes().crypto_length().value_or(
-          static_cast<int32_t>(key.value().size() * 8)
-      );
-      if (key_len > 0) {
         attrs->asStructure()->add(
-            Element::createInteger(tag::KMIP_TAG_CRYPTOGRAPHIC_LENGTH, key_len)
+            Element::createInteger(
+                tag::KMIP_TAG_CRYPTOGRAPHIC_LENGTH, pair->length
+            )
         );
       }
       if (const auto mask = key.attributes().usage_mask();
@@ -626,7 +721,7 @@ namespace kmipcore {
     if (detail::use_attributes_container(version)) {
       // KMIP 2.0: properly typed elements in Attributes container.
       payload->asStructure()->add(
-          detail::make_v2_register_key_attrs(name, group, key)
+          detail::make_v2_register_key_attrs(name, group, key, version)
       );
     } else {
       // KMIP 1.x: Attribute name/value pairs in TemplateAttribute.
@@ -638,24 +733,14 @@ namespace kmipcore {
         );
       }
 
-      if (const auto alg = key.attributes().algorithm();
-          alg != cryptographic_algorithm::KMIP_CRYPTOALG_UNSET) {
+      if (const auto pair = detail::algorithm_and_length(key, version)) {
         attributes.push_back(
             detail::make_enum_attribute(
-                "Cryptographic Algorithm", static_cast<int32_t>(alg)
+                "Cryptographic Algorithm", pair->algorithm
             )
         );
-      }
-      if (const auto len = key.attributes().crypto_length(); len.has_value()) {
         attributes.push_back(
-            detail::make_integer_attribute("Cryptographic Length", *len)
-        );
-      } else if (!key.value().empty()) {
-        attributes.push_back(
-            detail::make_integer_attribute(
-                "Cryptographic Length",
-                static_cast<int32_t>(key.value().size() * 8)
-            )
+            detail::make_integer_attribute("Cryptographic Length", pair->length)
         );
       }
       if (const auto mask = key.attributes().usage_mask();
@@ -689,7 +774,7 @@ namespace kmipcore {
       payload->asStructure()->add(detail::make_template_attribute(attributes));
     }
 
-    payload->asStructure()->add(detail::make_key_object_from_key(key));
+    payload->asStructure()->add(detail::make_key_object_from_key(key, version));
     setRequestPayload(payload);
   }
 

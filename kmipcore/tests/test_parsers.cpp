@@ -485,6 +485,206 @@ void test_key_parser_rejects_out_of_range_secret_type() {
             << std::endl;
 }
 
+// Cryptographic Algorithm and Length go out as a pair or not at all (KMIP
+// 1.4 §2.1.3 Table 7, 2.0 §3.1), in the Key Block and in Register's
+// attributes alike.
+void test_register_key_request_algorithm_and_length() {
+  struct Sent {
+    std::optional<int32_t> block_algorithm, block_length;
+    std::optional<int32_t> attr_algorithm, attr_length;
+  };
+  auto sent = [](const Key &key, ProtocolVersion version) {
+    RegisterKeyRequest req("k-name", "k-group", key, version);
+    const auto payload = req.getRequestPayload();
+    const auto value_of = [](const std::shared_ptr<Element> &e) {
+      return e ? std::optional<int32_t>(e->toInt()) : std::nullopt;
+    };
+    const auto enum_of = [](const std::shared_ptr<Element> &e) {
+      return e ? std::optional<int32_t>(e->toEnum()) : std::nullopt;
+    };
+    Sent out;
+    for (const auto object_tag :
+         {tag::KMIP_TAG_SYMMETRIC_KEY,
+          tag::KMIP_TAG_PRIVATE_KEY,
+          tag::KMIP_TAG_PUBLIC_KEY}) {
+      if (const auto object = payload->getChild(object_tag)) {
+        const auto block = object->getChild(tag::KMIP_TAG_KEY_BLOCK);
+        out.block_algorithm =
+            enum_of(block->getChild(tag::KMIP_TAG_CRYPTOGRAPHIC_ALGORITHM));
+        out.block_length =
+            value_of(block->getChild(tag::KMIP_TAG_CRYPTOGRAPHIC_LENGTH));
+      }
+    }
+    if (version.is_at_least(2, 0)) {
+      const auto attrs = payload->getChild(tag::KMIP_TAG_ATTRIBUTES);
+      out.attr_algorithm =
+          enum_of(attrs->getChild(tag::KMIP_TAG_CRYPTOGRAPHIC_ALGORITHM));
+      out.attr_length =
+          value_of(attrs->getChild(tag::KMIP_TAG_CRYPTOGRAPHIC_LENGTH));
+    } else {
+      const auto tmpl = payload->getChild(tag::KMIP_TAG_TEMPLATE_ATTRIBUTE);
+      for (const auto &attr : tmpl->getChildren(tag::KMIP_TAG_ATTRIBUTE)) {
+        const auto name =
+            attr->getChild(tag::KMIP_TAG_ATTRIBUTE_NAME)->toString();
+        const auto value = attr->getChild(tag::KMIP_TAG_ATTRIBUTE_VALUE);
+        if (name == "Cryptographic Algorithm") {
+          out.attr_algorithm = value->toEnum();
+        } else if (name == "Cryptographic Length") {
+          out.attr_length = value->toInt();
+        }
+      }
+    }
+    return out;
+  };
+  auto expect_pair = [](const Sent &s,
+                        std::optional<int32_t> algorithm,
+                        std::optional<int32_t> length) {
+    assert(s.block_algorithm == algorithm && s.attr_algorithm == algorithm);
+    assert(s.block_length == length && s.attr_length == length);
+  };
+  auto with = [](cryptographic_algorithm algorithm,
+                 std::optional<int32_t> length) {
+    Attributes attrs;
+    attrs.set_algorithm(algorithm);
+    if (length) {
+      attrs.set_crypto_length(*length);
+    }
+    return attrs;
+  };
+  const std::vector<unsigned char> der(121, 0x30);
+  const ProtocolVersion v14(1, 4);
+  const ProtocolVersion v20(2, 0);
+  constexpr auto kRsa = static_cast<int32_t>(KMIP_CRYPTOALG_RSA);
+  constexpr auto kAes = static_cast<int32_t>(KMIP_CRYPTOALG_AES);
+  constexpr auto kEd25519 = static_cast<int32_t>(KMIP_CRYPTOALG_ED25519);
+
+  for (const auto &version : {v14, v20}) {
+    // Both known: sent.
+    expect_pair(
+        sent(
+            Key(der,
+                KeyType::PRIVATE_KEY,
+                with(cryptographic_algorithm::KMIP_CRYPTOALG_RSA, 2048)),
+            version
+        ),
+        kRsa,
+        2048
+    );
+    // An asymmetric key's value size is not its length (it is the size of
+    // the encoding), so with no length set neither is sent.
+    expect_pair(
+        sent(
+            Key(
+                der,
+                KeyType::PUBLIC_KEY,
+                with(cryptographic_algorithm::KMIP_CRYPTOALG_RSA, std::nullopt)
+            ),
+            version
+        ),
+        std::nullopt,
+        std::nullopt
+    );
+    expect_pair(
+        sent(Key(der, KeyType::PRIVATE_KEY), version),
+        std::nullopt,
+        std::nullopt
+    );
+    // A Raw symmetric key's size is its length.
+    expect_pair(
+        sent(
+            Key(
+                std::vector<unsigned char>(16, 1),
+                KeyType::SYMMETRIC_KEY,
+                with(cryptographic_algorithm::KMIP_CRYPTOALG_AES, std::nullopt)
+            ),
+            version
+        ),
+        kAes,
+        128
+    );
+  }
+
+  // A Raw symmetric key does not carry its algorithm, so a Key Block
+  // without one would break the rule above: Register refuses it, also for
+  // an algorithm the request's KMIP version does not define.
+  // The message Register throws with for a symmetric key, or "" if none.
+  const auto register_error = [](const Key &key, ProtocolVersion version) {
+    try {
+      RegisterKeyRequest req("k-name", "k-group", key, version);
+    } catch (const KmipException &e) {
+      assert(e.code().value() == KMIP_INVALID_FIELD);
+      return std::string(e.what());
+    }
+    return std::string();
+  };
+  const auto mentions = [](const std::string &message, const char *part) {
+    return message.find(part) != std::string::npos;
+  };
+  const std::vector<unsigned char> raw(16, 1);
+  for (const auto &version : {v14, v20}) {
+    assert(mentions(
+        register_error(Key(raw, KeyType::SYMMETRIC_KEY), version),
+        "without a Cryptographic Algorithm"
+    ));
+    // The algorithm is there; what is missing is a length.
+    assert(mentions(
+        register_error(
+            Key(
+                std::vector<unsigned char>{},
+                KeyType::SYMMETRIC_KEY,
+                with(cryptographic_algorithm::KMIP_CRYPTOALG_AES, std::nullopt)
+            ),
+            version
+        ),
+        "without a Cryptographic Length"
+    ));
+    // A length that is set but not positive is named as such.
+    for (const int32_t length : {0, -8}) {
+      assert(mentions(
+          register_error(
+              Key(raw,
+                  KeyType::SYMMETRIC_KEY,
+                  with(cryptographic_algorithm::KMIP_CRYPTOALG_AES, length)),
+              version
+          ),
+          "it must be positive"
+      ));
+    }
+  }
+  const Key aria(
+      raw,
+      KeyType::SYMMETRIC_KEY,
+      with(cryptographic_algorithm::KMIP_CRYPTOALG_ARIA, std::nullopt)
+  );
+  assert(mentions(register_error(aria, v14), "KMIP 1.4 does not define"));
+  assert(register_error(aria, v20).empty());  // ARIA is KMIP 2.0 only
+
+  // Each 1.x version's own algorithm list: One Time Pad came in 1.3, so a
+  // 1.2 request must not send it (see last_crypto_algorithm()).
+  const Key one_time_pad(
+      raw,
+      KeyType::SYMMETRIC_KEY,
+      with(cryptographic_algorithm::KMIP_CRYPTOALG_ONE_TIME_PAD, std::nullopt)
+  );
+  assert(mentions(
+      register_error(one_time_pad, ProtocolVersion(1, 2)),
+      "KMIP 1.2 does not define"
+  ));
+  assert(register_error(one_time_pad, ProtocolVersion(1, 3)).empty());
+
+  // Ed25519 exists only in KMIP 2.0 (2.0 §11.12).
+  const Key ed25519(
+      der,
+      KeyType::PRIVATE_KEY,
+      with(cryptographic_algorithm::KMIP_CRYPTOALG_ED25519, 256)
+  );
+  expect_pair(sent(ed25519, v14), std::nullopt, std::nullopt);
+  expect_pair(sent(ed25519, v20), kEd25519, 256);
+
+  std::cout << "RegisterKeyRequest algorithm/length pairing test passed"
+            << std::endl;
+}
+
 void test_register_secret_request_structure() {
   const std::vector<unsigned char> secret = {'a', 'b', 0x00, 'c'};
   RegisterSecretRequest req(
@@ -1010,6 +1210,7 @@ int main() {
   test_key_parser_secret_binary();
   test_key_parser_rejects_out_of_range_secret_type();
   test_register_secret_request_structure();
+  test_register_key_request_algorithm_and_length();
   test_attributes_parser();
   test_attributes_parser_extended();
   test_attributes_parser_v2_typed();
