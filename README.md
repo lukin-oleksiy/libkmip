@@ -65,6 +65,16 @@ The integration tests require a running KMIP server, configured via the
 set. Set `KMIP_RUN_2_0_TESTS=1` (at build time too — test discovery filters
 on it) to also run the KMIP 2.0 suite.
 
+To run everything against the Cosmian KMS version CI uses, in Docker (needs
+`docker` and `openssl`; the server, its certificates and the environment are
+set up and removed by the script):
+
+```bash
+ci/run-integration-docker.sh                       # build in build/cosmian, run all tests
+ci/run-integration-docker.sh -- -R KmipClientIntegrationTest20  # args after -- go to ctest
+CMAKE_ARGS=-DWITH_ASAN=ON ci/run-integration-docker.sh --build-dir build/cosmian-asan
+```
+
 ### AddressSanitizer
 
 ```bash
