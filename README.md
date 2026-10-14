@@ -5,13 +5,16 @@ Protocol (KMIP), an [OASIS][oasis] communication standard for managing objects
 stored in key management systems. It supports KMIP 1.4 and 2.0 and is tested
 against PyKMIP, HashiCorp Vault, Fortanix DSM, and Cosmian KMS.
 
-The project consists of two libraries:
+The project consists of three libraries:
 
 * **`kmipcore`** — the protocol layer: typed KMIP model, TTLV
   serialization/parsing, request/response classes. No network code.
 * **`kmipclient`** — the client layer: high-level KMIP operations, an
   OpenSSL-based transport (replaceable via the `NetClient` interface), and a
   thread-safe connection pool.
+* **`kmiputil`** — helpers on top of `kmipclient`: reading keys from hex,
+  Base64 and PEM, writing them back, and generating AES keys. See the
+  [kmiputil README](kmiputil/README.md).
 
 Supported operations include creating, registering, retrieving, locating,
 activating, revoking, and destroying keys and secrets, as well as querying
