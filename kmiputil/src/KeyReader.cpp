@@ -39,7 +39,8 @@ namespace kmiputil {
       }
 
       unsigned char *der = nullptr;
-      const detail::DerBuffer buf(der, i2d_X509(cert, &der));
+      const int len = i2d_X509(cert, &der);
+      const detail::DerBuffer buf(der, len);
       X509_free(cert);
       if (!buf) {
         return nullptr;
@@ -60,7 +61,8 @@ namespace kmiputil {
       }
 
       unsigned char *der = nullptr;
-      const detail::DerBuffer buf(der, i2d_PrivateKey(pkey, &der));
+      const int len = i2d_PrivateKey(pkey, &der);
+      const detail::DerBuffer buf(der, len);
       EVP_PKEY_free(pkey);
       if (!buf) {
         return nullptr;
@@ -81,7 +83,8 @@ namespace kmiputil {
       }
 
       unsigned char *der = nullptr;
-      const detail::DerBuffer buf(der, i2d_PUBKEY(pkey, &der));
+      const int len = i2d_PUBKEY(pkey, &der);
+      const detail::DerBuffer buf(der, len);
       EVP_PKEY_free(pkey);
       if (!buf) {
         return nullptr;
@@ -98,7 +101,8 @@ namespace kmiputil {
     // is no standard PEM type for raw key material, so any other label (an
     // encrypted private key, say) must not be reinterpreted as an AES key
     // just because its body happens to decode to an AES key length.
-    constexpr std::string_view kSymmetricKeyBegin = "-----BEGIN SYMMETRIC KEY-----";
+    constexpr std::string_view kSymmetricKeyBegin =
+        "-----BEGIN SYMMETRIC KEY-----";
     constexpr std::string_view kSymmetricKeyEnd = "-----END SYMMETRIC KEY-----";
 
     std::unique_ptr<kmipclient::Key>
