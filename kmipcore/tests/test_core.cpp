@@ -7,6 +7,7 @@
 
 #include <cassert>
 #include <iostream>
+#include <kmipcore/kmip_attributes.hpp>
 #include <kmipcore/kmip_basics.hpp>
 #include <kmipcore/kmip_errors.hpp>
 #include <kmipcore/kmip_formatter.hpp>
@@ -1012,6 +1013,18 @@ void test_default_max_response_size() {
   std::cout << "Default MaxResponseSize test passed" << std::endl;
 }
 
+void test_attributes_set_c_string() {
+  Attributes attrs;
+  // A string literal must not bind to the bool overload.
+  attrs.set("x-literal", "value");
+  assert(attrs.get("x-literal") == "value");
+  const char *null_value = nullptr;
+  attrs.set("x-null", null_value);
+  assert(attrs.has_attribute("x-null"));
+  assert(attrs.get("x-null").empty());
+  std::cout << "Attributes set(const char *) test passed" << std::endl;
+}
+
 int main() {
   test_integer();
   test_structure();
@@ -1032,5 +1045,6 @@ int main() {
   test_request_header_authentication();
   test_max_response_size_range_check();
   test_default_max_response_size();
+  test_attributes_set_c_string();
   return 0;
 }

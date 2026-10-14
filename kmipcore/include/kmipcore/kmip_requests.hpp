@@ -129,6 +129,11 @@ namespace kmipcore {
      * @param name Value for KMIP Name attribute.
      * @param group Value for KMIP Object Group attribute.
      * @param key Key payload and metadata mapped to protocol object fields.
+     * @throws KmipException (KMIP_INVALID_FIELD) for a symmetric key without
+     * a Cryptographic Algorithm that @p version defines, or without a
+     * positive Cryptographic Length (set, or taken from the size of a
+     * non-empty value): raw key material does not carry them, and a Key
+     * Block needs both (KMIP 1.4 §2.1.3).
      */
     RegisterKeyRequest(
         const std::string &name,

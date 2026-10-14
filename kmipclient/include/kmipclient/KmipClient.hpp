@@ -113,7 +113,9 @@ namespace kmipclient {
      * @param group Value of the KMIP "Object Group" attribute.
      * @param k Key material and metadata to register.
      * @return Unique identifier assigned by the KMIP server.
-     * @throws kmipcore::KmipException on protocol or server-side failure.
+     * @throws kmipcore::KmipException on protocol or server-side failure, or
+     * for a symmetric key without a Cryptographic Algorithm defined in the
+     * client's KMIP version (raw key material does not carry it).
      */
     [[nodiscard]] std::string op_register_key(
         const std::string &name, const std::string &group, const Key &k
