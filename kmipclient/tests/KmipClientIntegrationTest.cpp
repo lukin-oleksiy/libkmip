@@ -564,6 +564,87 @@ TEST_F(KmipClientIntegrationTest, LocateKeysByGroupHonorsMaxIds) {
   }
 }
 
+// Test: op_locate_by_group finds every distinct id in a group larger than
+// one Locate page (MAX_ITEMS_IN_BATCH), even against a server that does not
+// report Located Items or honor Offset Items for grouped Locate (observed:
+// Cosmian KMS). Regression test for ENG-1274; the paging logic itself is
+// covered deterministically in LocatePagingTest, so this stays just over one
+// page to keep the suite fast.
+TEST_F(KmipClientIntegrationTest, LocateKeysByGroupBeyondSinglePage) {
+  auto kmip = createKmipClient();
+  std::string group_name =
+      "test_locate_group_beyond_page_" + std::to_string(std::time(nullptr));
+  constexpr int kKeyCount = 260;
+  std::vector<std::string> created_ids;
+  created_ids.reserve(kKeyCount);
+
+  try {
+    for (int i = 0; i < kKeyCount; ++i) {
+      auto key_id = kmip->client().op_create_aes_key(
+          TESTING_NAME_PREFIX + "LocateByGroupBeyondPage_" + std::to_string(i),
+          group_name
+      );
+      created_ids.push_back(key_id);
+      trackKeyForCleanup(key_id);
+    }
+
+    kmipclient::test::expect_exactly_ids(
+        kmip->client().op_locate_by_group(
+            group_name, object_type::KMIP_OBJTYPE_SYMMETRIC_KEY
+        ),
+        created_ids
+    );
+  } catch (kmipcore::KmipException &e) {
+    FAIL() << "LocateKeysByGroupBeyondSinglePage failed: " << e.what();
+  }
+}
+
+// Test: op_locate_by_group finds every distinct id in a group of Secret Data
+// objects larger than one Locate page, not just Symmetric Key objects. The
+// fix is generic over object_type, but secrets go through a separate
+// registration path (op_register_secret vs. op_create_aes_key), so this is
+// verified independently rather than assumed from the key test above.
+// Regression test for ENG-1274.
+TEST_F(KmipClientIntegrationTest, LocateSecretsByGroupBeyondSinglePage) {
+  auto kmip = createKmipClient();
+  std::string group_name = "test_locate_secrets_group_beyond_page_" +
+                           std::to_string(std::time(nullptr));
+  constexpr int kSecretCount = 260;
+  std::vector<std::string> created_ids;
+  created_ids.reserve(kSecretCount);
+
+  try {
+    for (int i = 0; i < kSecretCount; ++i) {
+      const std::string secret_text = "secret_" + std::to_string(i);
+      const std::vector<unsigned char> secret_data(
+          secret_text.begin(), secret_text.end()
+      );
+      kmipcore::Attributes secret_attrs;
+      secret_attrs.set_state(state::KMIP_STATE_PRE_ACTIVE);
+      const Secret secret(
+          secret_data, secret_data_type::KMIP_SECDATA_PASSWORD, secret_attrs
+      );
+      auto secret_id = kmip->client().op_register_secret(
+          TESTING_NAME_PREFIX + "LocateSecretsByGroupBeyondPage_" +
+              std::to_string(i),
+          group_name,
+          secret
+      );
+      created_ids.push_back(secret_id);
+      trackKeyForCleanup(secret_id);
+    }
+
+    kmipclient::test::expect_exactly_ids(
+        kmip->client().op_locate_by_group(
+            group_name, object_type::KMIP_OBJTYPE_SECRET_DATA
+        ),
+        created_ids
+    );
+  } catch (kmipcore::KmipException &e) {
+    FAIL() << "LocateSecretsByGroupBeyondSinglePage failed: " << e.what();
+  }
+}
+
 // Test: op_all with max_ids=0 returns no ids
 TEST_F(KmipClientIntegrationTest, GetAllIdsWithZeroLimitReturnsEmpty) {
   auto kmip = createKmipClient();

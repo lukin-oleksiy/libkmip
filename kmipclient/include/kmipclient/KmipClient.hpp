@@ -18,6 +18,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace kmipclient {
@@ -200,21 +201,43 @@ namespace kmipclient {
 
     /**
      * @brief Executes KMIP Locate using an exact object name filter.
+     *
+     * Pages through results the same way as op_locate_by_group(), with the
+     * same deduplication, fallback and failure behavior.
+     *
      * @param name Object name to match.
      * @param o_type KMIP object type to search.
-     * @return Matching object identifiers; may contain multiple IDs.
-     * @throws kmipcore::KmipException on protocol or server-side failure.
+     * @return Distinct matching object identifiers, at most
+     *         MAX_BATCHES_IN_SEARCH * MAX_ITEMS_IN_BATCH of them.
+     * @throws kmipcore::KmipException on protocol or server-side failure, or
+     *         when the complete list cannot be determined (see
+     *         op_locate_by_group()).
      */
     [[nodiscard]] std::vector<std::string>
         op_locate_by_name(const std::string &name, object_type o_type) const;
 
     /**
      * @brief Executes KMIP Locate using the object group filter.
+     *
+     * Pages with Offset Items and deduplicates the ids. A page with fewer
+     * ids than requested ends the search, as KMIP specifies, unless a usable
+     * Located Items total says more objects exist. Located Items is used
+     * only when it exceeds the page it came with, since some servers report
+     * the page count there instead of the total. When a page repeats ids
+     * already seen (the server ignores Offset Items, or its order changed), a
+     * usable total shows ids are still missing, or the request budget runs out,
+     * the search retries with a single, larger page at offset 0. Result size
+     * and request count stay bounded by @p max_ids whatever the server does.
+     *
      * @param group Group name to match.
      * @param o_type KMIP object type to search.
      * @param max_ids Upper bound on collected IDs across locate batches.
-     * @return Matching object identifiers, up to @p max_ids entries.
-     * @throws kmipcore::KmipException on protocol or server-side failure.
+     * @return Distinct matching object identifiers, up to @p max_ids entries.
+     * @throws kmipcore::KmipException on protocol or server-side failure, or
+     *         when the retry cannot confirm the list is complete: the
+     *         response would exceed the response-size limit, or the server
+     *         contradicts itself. A partial list is never returned from that
+     *         path.
      */
     [[nodiscard]] std::vector<std::string> op_locate_by_group(
         const std::string &group,
@@ -272,10 +295,18 @@ namespace kmipclient {
 
     /**
      * @brief Executes KMIP Locate without name/group filters.
+     *
+     * Pages like op_locate_by_group(). Unless the server's data confirms the
+     * list is complete, it then re-queries with smaller page sizes to catch
+     * ids that a server without a stable order can skip between pages.
+     *
      * @param o_type KMIP object type to fetch.
      * @param max_ids Upper bound on collected IDs across locate batches.
-     * @return Identifiers of matching objects, up to @p max_ids entries.
-     * @throws kmipcore::KmipException on protocol or server-side failure.
+     * @return Distinct identifiers of matching objects, up to @p max_ids
+     *         entries.
+     * @throws kmipcore::KmipException on protocol or server-side failure, or
+     *         when the complete list cannot be determined (see
+     *         op_locate_by_group()).
      */
     [[nodiscard]] std::vector<std::string> op_all(
         object_type o_type,
@@ -374,6 +405,38 @@ namespace kmipclient {
     [[nodiscard]] kmipcore::RequestMessage make_request_message() const {
       return kmipcore::RequestMessage(version_);
     }
+
+    struct LocateOutcome {
+      std::vector<std::string> ids;
+      // The same ids, for deduplicating further pages.
+      std::unordered_set<std::string> seen;
+      // True only when the server's own data proves the list is complete: a
+      // usable Located Items total was reached, or a single short page at
+      // offset 0 returned everything. Reaching the end of a list that took
+      // several pages does not count.
+      bool confirmed_complete = false;
+    };
+
+    [[nodiscard]] LocateOutcome locate_all(
+        bool by_group,
+        const std::string &filter,
+        object_type o_type,
+        std::size_t max_ids
+    ) const;
+
+    void probe_all(
+        object_type o_type, std::size_t max_ids, LocateOutcome &outcome
+    ) const;
+
+    [[nodiscard]] std::vector<std::string> locate_page(
+        bool by_group,
+        const std::string &filter,
+        object_type o_type,
+        std::size_t offset,
+        std::size_t page_size,
+        std::optional<std::size_t> *located_items,
+        std::size_t max_response_size
+    ) const;
   };
 
 }  // namespace kmipclient

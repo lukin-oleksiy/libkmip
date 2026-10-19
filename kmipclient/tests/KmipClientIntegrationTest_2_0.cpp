@@ -877,6 +877,79 @@ TEST_F(KmipClientIntegrationTest20, LocateKeysByGroupHonorsMaxIds) {
   }
 }
 
+// Test: op_locate_by_group finds every distinct key in a group larger than
+// one Locate page (MAX_ITEMS_IN_BATCH) over KMIP 2.0, whose Locate encoding
+// differs from 1.4. Over 2.0 Cosmian KMS also reports Located Items as the
+// page count rather than the total. Regression test for ENG-1274.
+TEST_F(KmipClientIntegrationTest20, LocateKeysByGroupBeyondSinglePage) {
+  auto kmip = createKmipClient();
+  const std::string group =
+      "test_2_0_locate_beyond_page_" + std::to_string(std::time(nullptr));
+  constexpr int kKeyCount = 260;
+  std::vector<std::string> created;
+  created.reserve(kKeyCount);
+
+  try {
+    for (int i = 0; i < kKeyCount; ++i) {
+      const auto id = kmip->client().op_create_aes_key(
+          TESTING_NAME_PREFIX + "LocateBeyondPage_" + std::to_string(i), group
+      );
+      created.push_back(id);
+      trackForCleanup(id);
+    }
+
+    kmipclient::test::expect_exactly_ids(
+        kmip->client().op_locate_by_group(
+            group, object_type::KMIP_OBJTYPE_SYMMETRIC_KEY
+        ),
+        created
+    );
+  } catch (kmipcore::KmipException &e) {
+    FAIL() << "LocateKeysByGroupBeyondSinglePage (2.0) failed: " << e.what();
+  }
+}
+
+// Test: same as above for Secret Data objects, which are registered through
+// op_register_secret rather than op_create_aes_key.
+TEST_F(KmipClientIntegrationTest20, LocateSecretsByGroupBeyondSinglePage) {
+  auto kmip = createKmipClient();
+  const std::string group = "test_2_0_locate_secrets_beyond_page_" +
+                            std::to_string(std::time(nullptr));
+  constexpr int kSecretCount = 260;
+  std::vector<std::string> created;
+  created.reserve(kSecretCount);
+
+  try {
+    for (int i = 0; i < kSecretCount; ++i) {
+      const std::string secret_text = "secret_" + std::to_string(i);
+      const std::vector<unsigned char> secret_data(
+          secret_text.begin(), secret_text.end()
+      );
+      kmipcore::Attributes secret_attrs;
+      secret_attrs.set_state(state::KMIP_STATE_PRE_ACTIVE);
+      const Secret secret(
+          secret_data, secret_data_type::KMIP_SECDATA_PASSWORD, secret_attrs
+      );
+      const auto id = kmip->client().op_register_secret(
+          TESTING_NAME_PREFIX + "LocateSecretsBeyondPage_" + std::to_string(i),
+          group,
+          secret
+      );
+      created.push_back(id);
+      trackForCleanup(id);
+    }
+
+    kmipclient::test::expect_exactly_ids(
+        kmip->client().op_locate_by_group(
+            group, object_type::KMIP_OBJTYPE_SECRET_DATA
+        ),
+        created
+    );
+  } catch (kmipcore::KmipException &e) {
+    FAIL() << "LocateSecretsByGroupBeyondSinglePage (2.0) failed: " << e.what();
+  }
+}
+
 // Test: Get attributes – Name and Object Group
 TEST_F(KmipClientIntegrationTest20, CreateAndGetAttributes) {
   auto kmip = createKmipClient();
