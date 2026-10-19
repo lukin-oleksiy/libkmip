@@ -326,8 +326,9 @@ namespace kmipcore {
     }
     request.header_.setTimeStamp(static_cast<int64_t>(time(nullptr)));
 
-    // Use SerializationBuffer for efficient serialization
-    SerializationBuffer buf(request.getMaxResponseSize());
+    // Maximum Response Size limits the reply, not this request, so it must
+    // not size the buffer: the default grows as needed.
+    SerializationBuffer buf;
     request.toElement()->serialize(buf);
     return buf.release();
   }
