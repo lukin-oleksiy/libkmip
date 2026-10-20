@@ -16,7 +16,11 @@
 
 #include <algorithm>
 #include <array>
+#include <climits>
+#include <openssl/err.h>
+#include <openssl/x509.h>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <unordered_set>
 
@@ -46,6 +50,79 @@ namespace kmipclient {
         KMIP_ATTR_NAME_NAME,
         KMIP_ATTR_NAME_OPERATION_POLICY_NAME
     };
+  }
+
+  // The Key Format Types op_get_key asks for an asymmetric key in, in order:
+  // the ones Register declares by default and kmiputil::KeyReader produces,
+  // so a fetched key reads the same as a registered one. Without asking,
+  // servers return their own default, e.g. PKCS#1 for RSA, or a Transparent
+  // structure for EC, which has no byte encoding. A server need only return
+  // a key in the format it was registered in; other conversions are
+  // optional (KMIP 1.4 §4.11, 2.0 §6.1.19). Symmetric keys are Raw already.
+  static std::vector<int32_t> preferred_key_formats(int32_t object_type) {
+    switch (object_type) {
+      case kmipcore::KMIP_OBJTYPE_PRIVATE_KEY:
+        return {kmipcore::KMIP_KEYFORMAT_PKCS8};
+      case kmipcore::KMIP_OBJTYPE_PUBLIC_KEY:
+        // KMIP encodes a public key's SubjectPublicKeyInfo as X.509 and
+        // defines PKCS#8 for private keys only (1.4 §2.1.3, 2.0 §11.25).
+        // Cosmian KMS deviates: it exports SubjectPublicKeyInfo only under
+        // the PKCS#8 label, so that is tried second.
+        return {kmipcore::KMIP_KEYFORMAT_X509, kmipcore::KMIP_KEYFORMAT_PKCS8};
+      default:
+        return {};
+    }
+  }
+
+  // Marks the thread's OpenSSL error queue for a later ERR_pop_to_mark(),
+  // with a placeholder error above the mark. OpenSSL 1.1.1 marks an entry
+  // with a flag, not a count, so a mark OpenSSL sets and pops itself on the
+  // same top entry (d2i_X509_PUBKEY does) would clear ours, and our pop
+  // would then drop the caller's errors too. kmiputil's OpenSslErrorScope
+  // does the same.
+  static void mark_openssl_errors() {
+    ERR_set_mark();
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L && !defined(LIBRESSL_VERSION_NUMBER)
+    ERR_raise(ERR_LIB_USER, 0xA5A);
+#else
+    ERR_put_error(ERR_LIB_USER, 0, 0xA5A, __FILE__, __LINE__);
+#endif
+  }
+
+  // Whether `der` is exactly one DER SubjectPublicKeyInfo. Checks the ASN.1
+  // structure only, so it holds for key types OpenSSL cannot decode too.
+  static bool is_subject_public_key_info(std::span<const unsigned char> der) {
+    if (der.empty() || der.size() > static_cast<std::size_t>(LONG_MAX)) {
+      return false;
+    }
+    // A failed parse pushes OpenSSL errors; keep them out of later calls
+    // (e.g. TLS) without dropping any the caller had pending.
+    mark_openssl_errors();
+    const unsigned char *p = der.data();
+    X509_PUBKEY *spki =
+        d2i_X509_PUBKEY(nullptr, &p, static_cast<long>(der.size()));
+    const bool whole = spki && p == der.data() + der.size();
+    X509_PUBKEY_free(spki);
+    ERR_pop_to_mark();
+    return whole;
+  }
+
+  // `key`, which came back in one of preferred_key_formats(), if op_get_key
+  // can return it as such, or null to treat it as not converted. A public
+  // key under the PKCS#8 label (Cosmian KMS, see above) qualifies only if it
+  // holds a SubjectPublicKeyInfo, which KMIP calls X.509: it is recorded as
+  // such, so registering the key again declares the standard format.
+  // Anything else under that label is no public key format KMIP defines.
+  static std::unique_ptr<Key> in_preferred_format(std::unique_ptr<Key> key) {
+    if (key->type() == KeyType::PUBLIC_KEY &&
+        key->key_format() ==
+            static_cast<int32_t>(kmipcore::KMIP_KEYFORMAT_PKCS8)) {
+      if (!is_subject_public_key_info(key->value())) {
+        return nullptr;
+      }
+      key->set_key_format(kmipcore::KMIP_KEYFORMAT_X509);
+    }
+    return key;
   }
 
   static bool should_retry_get_attributes_with_legacy_v2_encoding(
@@ -248,12 +325,10 @@ namespace kmipclient {
       );
 
       kmipcore::ResponseParser rf(response_bytes, request);
-      auto get_response =
+      const auto get_response =
           rf.getResponseByBatchItemId<kmipcore::GetResponseBatchItem>(
               get_item_id
           );
-      auto core_key = kmipcore::KeyParser::parseGetKeyResponse(get_response);
-      auto key = Key::from_core_key(core_key);
 
       auto attrs_response =
           rf.getResponseByBatchItemId<kmipcore::GetAttributesResponseBatchItem>(
@@ -268,6 +343,10 @@ namespace kmipclient {
             "Required attribute 'State' missing from server response"
         );
       }
+      // Only now, with Get Attributes settled, may key_from_get_response
+      // ask for the key again: the retries below are for Get Attributes
+      // errors and must neither see nor repeat its requests.
+      auto key = key_from_get_response(id, get_response);
       // Merge server-provided metadata (state, name, dates, …) into the key.
       key->attributes().merge(server_attrs);
       return key;
@@ -304,12 +383,10 @@ namespace kmipclient {
         request.serialize(), response_bytes, request.getMaxResponseSize()
     );
     kmipcore::ResponseParser rf(response_bytes, request);
-    auto get_response =
+    const auto get_response =
         rf.getResponseByBatchItemId<kmipcore::GetResponseBatchItem>(
             get_item_id
         );
-    auto core_key = kmipcore::KeyParser::parseGetKeyResponse(get_response);
-    auto key = Key::from_core_key(core_key);
     auto attrs_response =
         rf.getResponseByBatchItemId<kmipcore::GetAttributesResponseBatchItem>(
             attributes_item_id
@@ -321,8 +398,63 @@ namespace kmipclient {
           "Required attribute 'State' missing from server response"
       );
     }
+    auto key = key_from_get_response(id, get_response);
     key->attributes().merge(server_attrs);
     return key;
+  }
+
+  std::unique_ptr<Key> KmipClient::key_from_get_response(
+      const std::string &id, const kmipcore::GetResponseBatchItem &response
+  ) const {
+    const auto parse = [](const kmipcore::GetResponseBatchItem &r) {
+      return Key::from_core_key(kmipcore::KeyParser::parseGetKeyResponse(r));
+    };
+    const auto formats = preferred_key_formats(response.getObjectType());
+    if (formats.empty()) {
+      return parse(response);
+    }
+    const auto got = kmipcore::KeyParser::keyFormatType(response);
+    if (got && std::ranges::find(formats, *got) != formats.end()) {
+      if (auto key = in_preferred_format(parse(response))) {
+        return key;
+      }
+    }
+
+    // Ask for each preferred format in turn. The plain Get just succeeded,
+    // so a failed one here is about the format, whatever reason the server
+    // gives: KMIP defines Key Format Type Not Supported (1.4 §6.10), Cosmian
+    // KMS answers Operation Not Supported, others may differ. So any server
+    // failure moves on rather than fail where the plain Get worked; only
+    // I/O and parse errors are thrown.
+    for (const int32_t format : formats) {
+      auto request = make_request_message();
+      const auto get_item_id =
+          request.add_batch_item(kmipcore::GetRequest(id, format));
+      kmipcore::secure_bytes response_bytes;
+      io->do_exchange(
+          request.serialize(), response_bytes, request.getMaxResponseSize()
+      );
+      kmipcore::ResponseParser rf(response_bytes, request);
+      if (rf.getOperationResultByBatchItemId(get_item_id).resultStatus !=
+          kmipcore::KMIP_STATUS_SUCCESS) {
+        continue;
+      }
+      const auto refetched =
+          rf.getResponseByBatchItemId<kmipcore::GetResponseBatchItem>(
+              get_item_id
+          );
+      if (kmipcore::KeyParser::keyFormatType(refetched) == format) {
+        if (auto key = in_preferred_format(parse(refetched))) {
+          return key;
+        }
+      }
+      // Answered in some other format, or under the PKCS#8 label with no
+      // SubjectPublicKeyInfo: as good as a refusal.
+    }
+
+    // No conversion: keep the server's own format, which key_format()
+    // records. This throws for a Transparent format, which has no bytes.
+    return parse(response);
   }
 
   Secret KmipClient::op_get_secret(

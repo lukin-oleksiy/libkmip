@@ -15,33 +15,45 @@ namespace kmipclient {
     : key_value_(value.begin(), value.end()), attributes_(std::move(attrs)) {}
 
   kmipcore::Key Key::to_core_key() const {
-    return kmipcore::Key(key_value_, type(), attributes_);
+    kmipcore::Key core_key(key_value_, type(), attributes_);
+    core_key.set_key_format(key_format_);
+    return core_key;
   }
 
-  std::unique_ptr<Key> Key::from_core_key(const kmipcore::Key &core_key) {
-    switch (core_key.type()) {
-      case KeyType::SYMMETRIC_KEY:
-        return std::make_unique<SymmetricKey>(
-            core_key.value(), core_key.attributes()
-        );
-      case KeyType::PUBLIC_KEY:
-        return std::make_unique<PublicKey>(
-            core_key.value(), core_key.attributes()
-        );
-      case KeyType::PRIVATE_KEY:
-        return std::make_unique<PrivateKey>(
-            core_key.value(), core_key.attributes()
-        );
-      case KeyType::CERTIFICATE:
-        return std::make_unique<X509Certificate>(
-            core_key.value(), core_key.attributes()
-        );
-      case KeyType::UNSET:
-      default:
-        throw kmipcore::KmipException(
-            "Unsupported key type in core->client conversion"
-        );
+  namespace {
+
+    std::unique_ptr<Key> client_key_of_type(const kmipcore::Key &core_key) {
+      switch (core_key.type()) {
+        case KeyType::SYMMETRIC_KEY:
+          return std::make_unique<SymmetricKey>(
+              core_key.value(), core_key.attributes()
+          );
+        case KeyType::PUBLIC_KEY:
+          return std::make_unique<PublicKey>(
+              core_key.value(), core_key.attributes()
+          );
+        case KeyType::PRIVATE_KEY:
+          return std::make_unique<PrivateKey>(
+              core_key.value(), core_key.attributes()
+          );
+        case KeyType::CERTIFICATE:
+          return std::make_unique<X509Certificate>(
+              core_key.value(), core_key.attributes()
+          );
+        case KeyType::UNSET:
+        default:
+          throw kmipcore::KmipException(
+              "Unsupported key type in core->client conversion"
+          );
+      }
     }
+
+  }  // namespace
+
+  std::unique_ptr<Key> Key::from_core_key(const kmipcore::Key &core_key) {
+    auto key = client_key_of_type(core_key);
+    key->set_key_format(core_key.key_format());
+    return key;
   }
 
 }  // namespace kmipclient

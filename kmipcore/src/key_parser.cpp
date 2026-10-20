@@ -15,6 +15,18 @@ namespace kmipcore {
 
   namespace {
 
+    /** Copies Key Material straight into zeroed-on-free memory. toBytes()
+     * would return another, plain copy of the key that is never zeroed. */
+    secure_bytes secure_key_material(const Element &key_material) {
+      const auto *bytes = std::get_if<ByteString>(&key_material.value);
+      if (!bytes) {
+        throw KmipException(
+            KMIP_INVALID_ENCODING, "Key Material is not a byte string."
+        );
+      }
+      return secure_bytes(bytes->value.begin(), bytes->value.end());
+    }
+
     /** Extract a Key from an element that contains a KeyBlock (Symmetric Key,
      * Private Key, Public Key). */
     Key parse_key_from_key_block_holder(
@@ -46,8 +58,28 @@ namespace kmipcore {
         );
       }
 
-      auto raw_bytes = key_material->toBytes();
-      secure_bytes kv(raw_bytes.begin(), raw_bytes.end());
+      // REQUIRED in a Key Block (KMIP 1.4 §2.1.3 Table 7, 2.0 §3.1).
+      auto key_format = key_block->getChild(tag::KMIP_TAG_KEY_FORMAT_TYPE);
+      if (!key_format) {
+        throw KmipException(
+            KMIP_INVALID_ENCODING,
+            std::string("Missing Key Format Type in ") + type_name +
+                " response."
+        );
+      }
+      // Transparent Key Format Types hold a structure of key components
+      // (1.4 §2.1.7), which this library does not convert to bytes.
+      if (key_material->asStructure()) {
+        throw KmipException(
+            KMIP_NOT_IMPLEMENTED,
+            std::string("Key Material of the ") + type_name +
+                " is a structure (Key Format Type " +
+                std::to_string(key_format->toEnum()) +
+                "); only byte-string Key Format Types are supported."
+        );
+      }
+
+      secure_bytes kv = secure_key_material(*key_material);
 
       // Parse attributes from the key value's Attribute children.
       Attributes key_attrs = AttributesParser::parse(
@@ -66,13 +98,29 @@ namespace kmipcore {
         key_attrs.set_crypto_length(len_elem->toInt());
       }
 
-      return Key(kv, key_type, std::move(key_attrs));
+      Key key(kv, key_type, std::move(key_attrs));
+      key.set_key_format(key_format->toEnum());
+      return key;
     }
 
   }  // anonymous namespace
 
   Key KeyParser::parseGetKeyResponse(const GetResponseBatchItem &item) {
     return parseResponse(item.getResponsePayload());
+  }
+
+  std::optional<int32_t>
+      KeyParser::keyFormatType(const GetResponseBatchItem &item) {
+    const auto object = item.getObjectElement();
+    const auto key_block =
+        object ? object->getChild(tag::KMIP_TAG_KEY_BLOCK) : nullptr;
+    const auto key_format =
+        key_block ? key_block->getChild(tag::KMIP_TAG_KEY_FORMAT_TYPE)
+                  : nullptr;
+    if (!key_format) {
+      return std::nullopt;
+    }
+    return key_format->toEnum();
   }
 
   Secret KeyParser::parseGetSecretResponse(const GetResponseBatchItem &item) {
@@ -117,10 +165,8 @@ namespace kmipcore {
       );
     }
 
-    auto raw_bytes = key_material->toBytes();
-
     Secret secret;
-    secret.set_value(secure_bytes(raw_bytes.begin(), raw_bytes.end()));
+    secret.set_value(secure_key_material(*key_material));
     secret.set_secret_type(checked_secret_data_type(secret_type->toEnum()));
     return secret;
   }

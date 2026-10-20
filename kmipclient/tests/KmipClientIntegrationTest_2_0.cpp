@@ -435,6 +435,46 @@ TEST_F(KmipClientIntegrationTest20, CreateSymmetricAESKey) {
 }
 
 // Test: Create and Get key – round-trip
+// Asymmetric keys are registered as PKCS#8 (private) and X.509 (public),
+// and a server SHALL return a key in the format it was registered in (KMIP
+// 1.4 §4.11, 2.0 §6.1.19): op_get_key must give back the same bytes, with
+// that format recorded.
+TEST_F(KmipClientIntegrationTest20, RegisterAndGetAsymmetricKeys) {
+  auto kmip = createKmipClient();
+  for (const int evp_type : {EVP_PKEY_RSA, EVP_PKEY_EC}) {
+    const auto pair = kmipclient_test::generate_key_pair(evp_type);
+    for (const Key *key :
+         {static_cast<const Key *>(&pair.private_key),
+          static_cast<const Key *>(&pair.public_key)}) {
+      const bool is_private = key->type() == KeyType::PRIVATE_KEY;
+      SCOPED_TRACE(
+          std::string(evp_type == EVP_PKEY_RSA ? "RSA" : "EC") +
+          (is_private ? " private" : " public") + " key"
+      );
+      try {
+        const auto id = kmip->client().op_register_key(
+            TESTING_NAME_PREFIX + "RegisterAndGetAsymmetricKeys",
+            TEST_GROUP,
+            *key
+        );
+        trackForCleanup(id);
+        const auto fetched = kmip->client().op_get_key(id);
+        EXPECT_EQ(fetched->type(), key->type());
+        EXPECT_EQ(fetched->value(), key->value());
+        EXPECT_EQ(
+            fetched->key_format(),
+            static_cast<int32_t>(
+                is_private ? kmipcore::KMIP_KEYFORMAT_PKCS8
+                           : kmipcore::KMIP_KEYFORMAT_X509
+            )
+        );
+      } catch (const kmipcore::KmipException &e) {
+        ADD_FAILURE() << "register/get failed: " << e.what();
+      }
+    }
+  }
+}
+
 TEST_F(KmipClientIntegrationTest20, CreateAndGetKey) {
   auto kmip = createKmipClient();
   try {

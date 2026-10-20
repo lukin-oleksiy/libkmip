@@ -14,6 +14,7 @@
 #include "kmipcore/secret.hpp"
 
 #include <memory>
+#include <optional>
 
 namespace kmipcore {
 
@@ -34,6 +35,13 @@ namespace kmipcore {
      * @param item Typed Get response batch item.
      */
     static Secret parseGetSecretResponse(const GetResponseBatchItem &item);
+    /**
+     * @brief Returns the Key Format Type of the key in a Get response, or
+     * nullopt when the object has no Key Block.
+     * @param item Typed Get response batch item.
+     */
+    static std::optional<int32_t>
+        keyFormatType(const GetResponseBatchItem &item);
 
   private:
     /** @brief Internal key parser used by typed public entry points. */

@@ -292,6 +292,11 @@ namespace kmipcore {
           pair ? std::optional<int32_t>(pair->algorithm) : std::nullopt;
       const std::optional<int32_t> key_len =
           pair ? std::optional<int32_t>(pair->length) : std::nullopt;
+      // The value's own Key Format Type when known (e.g. PKCS#1 for a key a
+      // server only returned that way), else the default of its type.
+      const auto format_or = [&](int32_t default_format) {
+        return key.key_format().value_or(default_format);
+      };
       switch (key.type()) {
         case KeyType::SYMMETRIC_KEY: {
           // Raw key material does not carry its algorithm, so a symmetric
@@ -304,24 +309,24 @@ namespace kmipcore {
           }
           auto symmetric_key =
               Element::createStructure(tag::KMIP_TAG_SYMMETRIC_KEY);
-          symmetric_key->asStructure()->add(
-              make_key_block(KMIP_KEYFORMAT_RAW, key.value(), key_alg, key_len)
-          );
+          symmetric_key->asStructure()->add(make_key_block(
+              format_or(KMIP_KEYFORMAT_RAW), key.value(), key_alg, key_len
+          ));
           return symmetric_key;
         }
         case KeyType::PRIVATE_KEY: {
           auto private_key =
               Element::createStructure(tag::KMIP_TAG_PRIVATE_KEY);
           private_key->asStructure()->add(make_key_block(
-              KMIP_KEYFORMAT_PKCS8, key.value(), key_alg, key_len
+              format_or(KMIP_KEYFORMAT_PKCS8), key.value(), key_alg, key_len
           ));
           return private_key;
         }
         case KeyType::PUBLIC_KEY: {
           auto public_key = Element::createStructure(tag::KMIP_TAG_PUBLIC_KEY);
-          public_key->asStructure()->add(
-              make_key_block(KMIP_KEYFORMAT_X509, key.value(), key_alg, key_len)
-          );
+          public_key->asStructure()->add(make_key_block(
+              format_or(KMIP_KEYFORMAT_X509), key.value(), key_alg, key_len
+          ));
           return public_key;
         }
         case KeyType::CERTIFICATE:

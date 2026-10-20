@@ -12,6 +12,7 @@
 #include "kmipcore/key.hpp"
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -83,6 +84,23 @@ namespace kmipclient {
       attributes_.set(name, val);
     }
 
+    // ---- Key Format Type ----
+
+    /**
+     * @brief Key Format Type of the value (KMIP 1.4 §9.1.3.2.3), e.g.
+     * KMIP_KEYFORMAT_PKCS1 for a key the server could only return that way,
+     * or nullopt for the default of the key's type: Raw for symmetric keys,
+     * PKCS#8 for private keys, X.509 for public keys. Register declares this
+     * format, so it must describe the bytes in value().
+     */
+    [[nodiscard]] std::optional<int32_t> key_format() const noexcept {
+      return key_format_;
+    }
+    /** @brief Sets the Key Format Type of the value. */
+    void set_key_format(std::optional<int32_t> format) noexcept {
+      key_format_ = format;
+    }
+
     // ---- Key kind ----
 
     [[nodiscard]] virtual KeyType type() const noexcept = 0;
@@ -109,6 +127,7 @@ namespace kmipclient {
   private:
     kmipcore::secure_bytes key_value_;
     kmipcore::Attributes attributes_;
+    std::optional<int32_t> key_format_;
   };
 
 }  // namespace kmipclient
