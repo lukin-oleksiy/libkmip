@@ -339,6 +339,17 @@ PEM, writing them back, and generating AES keys live in the separate
 | `kmiputil::KeyGenerator::generate_aes(size)` | Generate a random AES key (128/192/256 bits) |
 
 `op_get_key(...)` returns `std::unique_ptr<Key>` (polymorphic typed key).
+It asks for private keys as PKCS#8 and public keys as X.509
+(SubjectPublicKeyInfo), the formats `Register` uses and `kmiputil::KeyReader`
+produces. Servers need not convert other keys to them (KMIP 1.4 §4.11), so a
+key may come back in the server's own byte format instead, e.g. PKCS#1;
+`key_format()` then says which, and registering the key again declares it.
+Asking again costs extra requests, on every call since nothing is cached:
+one per asymmetric key whose default format differs, two for a public key
+on a server that refuses X.509 (Cosmian KMS). None are needed for symmetric
+keys, for private keys the server already returns as PKCS#8, or for public
+keys it returns as a SubjectPublicKeyInfo (labelled X.509, or PKCS#8 as
+Cosmian KMS does).
 All derived key types expose these common `Key` accessors:
 
 | Method | Return type | Description |
@@ -347,6 +358,7 @@ All derived key types expose these common `Key` accessors:
 | `type()` | `KeyType` | Key family (`SYMMETRIC_KEY`, `PUBLIC_KEY`, …) |
 | `algorithm()` | `cryptographic_algorithm` | KMIP cryptographic algorithm enum |
 | `usage_mask()` | `cryptographic_usage_mask` | KMIP usage mask flags |
+| `key_format()` | `std::optional<int32_t>` | KMIP Key Format Type of `value()`; unset means the type's default (Raw, PKCS#8, X.509) |
 | `attributes()` | `const std::unordered_map<std::string, std::string> &` | Full attribute map |
 | `attribute_value(name)` | `const std::string &` | Single attribute by name (see below) |
 

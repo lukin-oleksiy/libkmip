@@ -16,6 +16,17 @@ Oct, 2026 Version 0.4.0
     Cryptographic Algorithm (defined in the client's KMIP version) now throws
     instead of sending a Key Block KMIP does not allow.
     Requires kmipcore 0.3.0.
+    op_get_key asks for private keys as PKCS#8 and public keys as X.509 when
+    the server's default differs; it used to take any format as PKCS#8/X.509
+    bytes, and threw for EC keys a server returned as a Transparent
+    structure. A server that cannot convert keeps its own byte format.
+    This costs up to two extra requests per asymmetric key fetched in
+    another format (none for symmetric keys); see README.
+    New: Key::key_format(), the Key Format Type of value(), which Register
+    declares.
+    Stricter: a key in a Get response whose Key Block has no Key Format Type
+    (REQUIRED by KMIP 1.4 §2.1.3) is rejected; only symmetric keys were
+    checked before.
 
 Mar, 2026 Version 0.2.0
 

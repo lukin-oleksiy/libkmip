@@ -685,6 +685,122 @@ void test_register_key_request_algorithm_and_length() {
             << std::endl;
 }
 
+void test_get_request_key_format_type() {
+  // No Key Format Type unless asked for: the server picks its default.
+  const auto plain = GetRequest("id-1").getRequestPayload();
+  assert(plain->getChild(tag::KMIP_TAG_KEY_FORMAT_TYPE) == nullptr);
+
+  const auto pkcs8 =
+      GetRequest("id-1", KMIP_KEYFORMAT_PKCS8).getRequestPayload();
+  auto format = pkcs8->getChild(tag::KMIP_TAG_KEY_FORMAT_TYPE);
+  assert(format != nullptr && format->toEnum() == KMIP_KEYFORMAT_PKCS8);
+  assert(
+      pkcs8->getChild(tag::KMIP_TAG_UNIQUE_IDENTIFIER)->toString() == "id-1"
+  );
+
+  std::cout << "GetRequest Key Format Type test passed" << std::endl;
+}
+
+void test_key_parser_key_format_type() {
+  auto get_response_with = [](std::shared_ptr<Element> object, int32_t type) {
+    auto payload = Element::createStructure(tag::KMIP_TAG_RESPONSE_PAYLOAD);
+    payload->asStructure()->add(
+        Element::createEnumeration(tag::KMIP_TAG_OBJECT_TYPE, type)
+    );
+    payload->asStructure()->add(
+        Element::createTextString(tag::KMIP_TAG_UNIQUE_IDENTIFIER, "id-1")
+    );
+    payload->asStructure()->add(object);
+    ResponseBatchItem item;
+    item.setOperation(KMIP_OP_GET);
+    item.setResultStatus(KMIP_STATUS_SUCCESS);
+    item.setResponsePayload(payload);
+    return GetResponseBatchItem::fromBatchItem(item);
+  };
+
+  // A private key in the given format, with byte or structure material.
+  auto private_key_in = [](int32_t format, bool structure_material) {
+    auto material =
+        structure_material
+            ? Element::createStructure(tag::KMIP_TAG_KEY_MATERIAL)
+            : Element::createByteString(
+                  tag::KMIP_TAG_KEY_MATERIAL, std::vector<uint8_t>(8, 0x30)
+              );
+    auto key_value = Element::createStructure(tag::KMIP_TAG_KEY_VALUE);
+    key_value->asStructure()->add(material);
+    auto key_block = Element::createStructure(tag::KMIP_TAG_KEY_BLOCK);
+    key_block->asStructure()->add(
+        Element::createEnumeration(tag::KMIP_TAG_KEY_FORMAT_TYPE, format)
+    );
+    key_block->asStructure()->add(key_value);
+    auto private_key = Element::createStructure(tag::KMIP_TAG_PRIVATE_KEY);
+    private_key->asStructure()->add(key_block);
+    return private_key;
+  };
+
+  const auto pkcs1 = get_response_with(
+      private_key_in(KMIP_KEYFORMAT_PKCS1, false), KMIP_OBJTYPE_PRIVATE_KEY
+  );
+  assert(KeyParser::keyFormatType(pkcs1) == KMIP_KEYFORMAT_PKCS1);
+  // The parsed key records the format of its bytes.
+  assert(
+      KeyParser::parseGetKeyResponse(pkcs1).key_format() ==
+      static_cast<int32_t>(KMIP_KEYFORMAT_PKCS1)
+  );
+
+  // Transparent formats hold a structure, which is reported, not
+  // misread as bytes.
+  const auto transparent = get_response_with(
+      private_key_in(KMIP_KEYFORMAT_TRANS_EC_PRIVATE_KEY, true),
+      KMIP_OBJTYPE_PRIVATE_KEY
+  );
+  bool threw = false;
+  try {
+    (void) KeyParser::parseGetKeyResponse(transparent);
+  } catch (const KmipException &e) {
+    threw = e.code().value() == KMIP_NOT_IMPLEMENTED;
+  }
+  assert(threw);
+
+  // No Key Block, no Key Format Type.
+  auto bare_key = Element::createStructure(tag::KMIP_TAG_PRIVATE_KEY);
+  assert(!KeyParser::keyFormatType(
+              get_response_with(bare_key, KMIP_OBJTYPE_PRIVATE_KEY)
+  )
+              .has_value());
+
+  std::cout << "KeyParser::keyFormatType test passed" << std::endl;
+}
+
+// Register declares the value's recorded Key Format Type, else the default
+// of its type.
+void test_register_key_request_key_format() {
+  auto declared = [](const Key &key, Tag object_tag) {
+    RegisterKeyRequest req("k-name", "k-group", key);
+    return req.getRequestPayload()
+        ->getChild(object_tag)
+        ->getChild(tag::KMIP_TAG_KEY_BLOCK)
+        ->getChild(tag::KMIP_TAG_KEY_FORMAT_TYPE)
+        ->toEnum();
+  };
+  const std::vector<unsigned char> der(121, 0x30);
+  assert(
+      declared(Key(der, KeyType::PRIVATE_KEY), tag::KMIP_TAG_PRIVATE_KEY) ==
+      static_cast<int32_t>(KMIP_KEYFORMAT_PKCS8)
+  );
+  assert(
+      declared(Key(der, KeyType::PUBLIC_KEY), tag::KMIP_TAG_PUBLIC_KEY) ==
+      static_cast<int32_t>(KMIP_KEYFORMAT_X509)
+  );
+  Key pkcs1(der, KeyType::PRIVATE_KEY);
+  pkcs1.set_key_format(KMIP_KEYFORMAT_PKCS1);
+  assert(
+      declared(pkcs1, tag::KMIP_TAG_PRIVATE_KEY) ==
+      static_cast<int32_t>(KMIP_KEYFORMAT_PKCS1)
+  );
+  std::cout << "RegisterKeyRequest Key Format Type test passed" << std::endl;
+}
+
 void test_register_secret_request_structure() {
   const std::vector<unsigned char> secret = {'a', 'b', 0x00, 'c'};
   RegisterSecretRequest req(
@@ -1211,6 +1327,9 @@ int main() {
   test_key_parser_rejects_out_of_range_secret_type();
   test_register_secret_request_structure();
   test_register_key_request_algorithm_and_length();
+  test_get_request_key_format_type();
+  test_key_parser_key_format_type();
+  test_register_key_request_key_format();
   test_attributes_parser();
   test_attributes_parser_extended();
   test_attributes_parser_v2_typed();

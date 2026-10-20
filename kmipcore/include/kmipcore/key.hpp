@@ -11,6 +11,8 @@
 #include "kmipcore/kmip_enums.hpp"
 #include "kmipcore/managed_object.hpp"
 
+#include <optional>
+
 namespace kmipcore {
 
   /** @brief Key object families represented by @ref Key. */
@@ -60,8 +62,23 @@ namespace kmipcore {
     /** @brief Returns key length in bytes. */
     [[nodiscard]] size_t size() const noexcept { return value_.size(); }
 
+    /**
+     * @brief Key Format Type of the value (KMIP 1.4 §9.1.3.2.3), e.g.
+     * KMIP_KEYFORMAT_PKCS1 for a key a server returned that way, or nullopt
+     * for the default of its type: Raw for symmetric keys, PKCS#8 for
+     * private keys, X.509 for public keys.
+     */
+    [[nodiscard]] std::optional<int32_t> key_format() const noexcept {
+      return key_format_;
+    }
+    /** @brief Sets the Key Format Type of the value. */
+    void set_key_format(std::optional<int32_t> format) noexcept {
+      key_format_ = format;
+    }
+
   private:
     KeyType key_type = KeyType::UNSET;
+    std::optional<int32_t> key_format_;
   };
 
 }  // namespace kmipcore

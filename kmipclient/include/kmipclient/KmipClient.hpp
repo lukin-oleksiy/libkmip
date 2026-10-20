@@ -21,6 +21,10 @@
 #include <unordered_set>
 #include <vector>
 
+namespace kmipcore {
+  class GetResponseBatchItem;
+}  // namespace kmipcore
+
 namespace kmipclient {
 
   /** Maximum number of KMIP locate response batches processed by search
@@ -155,10 +159,19 @@ namespace kmipclient {
 
     /**
      * @brief Executes KMIP Get and decodes a key object.
+     *
+     * Asymmetric keys are returned as PKCS#8 (private) or X.509
+     * SubjectPublicKeyInfo (public), the formats Register declares by
+     * default. When the server's default format differs, the key is asked
+     * for again in those formats: up to two more Get requests. A server need
+     * not convert (KMIP 1.4 §4.11); if it refuses, the key keeps the
+     * server's own byte format, which Key::key_format() records.
      * @param id Unique identifier of the key object.
      * @param all_attributes When true, fetches all available attributes.
      * @return Decoded key object.
-     * @throws kmipcore::KmipException on protocol or server-side failure.
+     * @throws kmipcore::KmipException on protocol or server-side failure, or
+     * (KMIP_NOT_IMPLEMENTED) for a key the server returns only in a
+     * Transparent Key Format Type, which holds no byte encoding.
      */
     [[nodiscard]] std::unique_ptr<Key>
         op_get_key(const std::string &id, bool all_attributes = false) const;
@@ -438,6 +451,10 @@ namespace kmipclient {
         std::size_t page_size,
         std::optional<std::size_t> *located_items,
         std::size_t max_response_size
+    ) const;
+
+    [[nodiscard]] std::unique_ptr<Key> key_from_get_response(
+        const std::string &id, const kmipcore::GetResponseBatchItem &response
     ) const;
   };
 

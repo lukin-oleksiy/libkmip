@@ -119,6 +119,7 @@ if(BUILD_TESTS)
     kmipclient_test
     tests/IOUtilsTest.cpp
     tests/LocatePagingTest.cpp
+    tests/GetKeyFormatTest.cpp
     tests/KmipClientIntegrationTest.cpp
     tests/KmipClientIntegrationTest_2_0.cpp
     tests/KmipClientPoolIntegrationTest.cpp

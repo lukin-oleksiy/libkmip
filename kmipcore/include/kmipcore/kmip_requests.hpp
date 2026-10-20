@@ -15,6 +15,7 @@
 
 #include <ctime>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -48,8 +49,34 @@ namespace kmipcore {
     }
   };
 
-  /** @brief Typed request alias for KMIP Get operation. */
-  using GetRequest = SimpleIdRequest<KMIP_OP_GET>;
+  /** @brief Request for KMIP Get operation. */
+  class GetRequest : public RequestBatchItem {
+  public:
+    /**
+     * @brief Builds a Get request.
+     * @param unique_id KMIP unique identifier of target object.
+     * @param key_format_type Key Format Type to return a key in (e.g.
+     * KMIP_KEYFORMAT_PKCS8). Without it the server picks its default.
+     */
+    explicit GetRequest(
+        const std::string &unique_id,
+        std::optional<int32_t> key_format_type = std::nullopt
+    ) {
+      setOperation(KMIP_OP_GET);
+      auto payload = Element::createStructure(tag::KMIP_TAG_REQUEST_PAYLOAD);
+      payload->asStructure()->add(
+          Element::createTextString(tag::KMIP_TAG_UNIQUE_IDENTIFIER, unique_id)
+      );
+      if (key_format_type) {
+        payload->asStructure()->add(
+            Element::createEnumeration(
+                tag::KMIP_TAG_KEY_FORMAT_TYPE, *key_format_type
+            )
+        );
+      }
+      setRequestPayload(payload);
+    }
+  };
   /** @brief Typed request alias for KMIP Activate operation. */
   using ActivateRequest = SimpleIdRequest<KMIP_OP_ACTIVATE>;
   /** @brief Typed request alias for KMIP Destroy operation. */
