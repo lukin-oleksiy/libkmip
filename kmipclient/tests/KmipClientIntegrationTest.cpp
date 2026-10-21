@@ -1422,12 +1422,13 @@ int main(int argc, char **argv) {
   // Get configuration
   auto &config = KmipTestConfig::getInstance();
 
-  // Check if KMIP 2.0 tests should be skipped
+  // The KMIP 2.0 fixture skips its tests itself when KMIP_RUN_2_0_TESTS is
+  // unset. Don't set a gtest filter here: it would replace the one ctest
+  // passes for each test, and gtest_discover_tests would not list the 2.0
+  // tests unless KMIP_RUN_2_0_TESTS was set at build time.
   if (!config.run_2_0_tests) {
-    // Exclude the entire KMIP 2.0 test suite if env var is not set
-    ::testing::GTEST_FLAG(filter) = "-KmipClientIntegrationTest20.*";
     std::cout << "INFO: KMIP_RUN_2_0_TESTS is not set. "
-              << "KMIP 2.0 tests will not run.\n"
+              << "KMIP 2.0 tests will be skipped.\n"
               << "Set KMIP_RUN_2_0_TESTS=1 to enable the KMIP 2.0 suite.\n"
               << std::endl;
   }

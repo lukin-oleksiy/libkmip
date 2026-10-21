@@ -151,8 +151,7 @@ export KMIP_CLIENT_CA="$WORKDIR/client.pem"
 export KMIP_CLIENT_KEY="$WORKDIR/client.key"
 export KMIP_SERVER_CA="$WORKDIR/ca.pem"
 export KMIP_TIMEOUT_MS=5000
-# Needed at build time too: gtest discovery runs post-build and leaves the
-# KMIP 2.0 suite out of the test list when this is unset.
+# Runs the KMIP 2.0 suite too; it skips itself when this is unset.
 export KMIP_RUN_2_0_TESTS=1
 
 if [ -n "$KEEP" ]; then

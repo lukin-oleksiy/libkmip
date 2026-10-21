@@ -67,8 +67,8 @@ ctest --test-dir build --output-on-failure
 The integration tests require a running KMIP server, configured via the
 `KMIP_ADDR`, `KMIP_PORT`, `KMIP_CLIENT_CA`, `KMIP_CLIENT_KEY`, and
 `KMIP_SERVER_CA` environment variables; they are skipped when these are not
-set. Set `KMIP_RUN_2_0_TESTS=1` (at build time too — test discovery filters
-on it) to also run the KMIP 2.0 suite.
+set. Set `KMIP_RUN_2_0_TESTS=1` to also run the KMIP 2.0 suite; without it,
+its tests are reported as skipped.
 
 To run everything against the Cosmian KMS version CI uses, in Docker (needs
 `docker` and `openssl`; the server, its certificates and the environment are
