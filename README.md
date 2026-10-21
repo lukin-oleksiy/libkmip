@@ -40,7 +40,7 @@ which generates its key with kmiputil and lives in
 ## Requirements
 
 * A C++20 compiler (GCC or Clang)
-* CMake 3.10 or newer
+* CMake 3.14 or newer
 * OpenSSL
 
 ## Build
@@ -50,8 +50,9 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ```
 
-To install, add `cmake --install build` (use `-DCMAKE_INSTALL_PREFIX` to
-choose a custom prefix). A project using the installed package can then do:
+To install, add `cmake --install build` (CMake 3.15 or newer; with 3.14 use
+`cmake --build build --target install`), and use `-DCMAKE_INSTALL_PREFIX` to
+choose a custom prefix. A project using the installed package can then do:
 
 ```cmake
 find_package(kmipclient REQUIRED)
