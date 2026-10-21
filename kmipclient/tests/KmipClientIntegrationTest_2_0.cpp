@@ -125,7 +125,7 @@ private:
 
     if (!run_2_0_tests) {
       std::cerr << "INFO: KMIP_RUN_2_0_TESTS is not set. "
-                   "KMIP 2.0 tests will not run.\n"
+                   "KMIP 2.0 tests will be skipped.\n"
                 << "Set KMIP_RUN_2_0_TESTS=1 to enable the KMIP 2.0 suite.\n";
     }
   }

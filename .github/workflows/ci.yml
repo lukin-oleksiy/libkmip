@@ -26,8 +26,7 @@ jobs:
     env:
       CC: ${{ matrix.compiler == 'gcc' && 'gcc' || 'clang' }}
       CXX: ${{ matrix.compiler == 'gcc' && 'g++' || 'clang++' }}
-      # Must be set at BUILD time too: gtest test discovery runs post-build
-      # and filters the KMIP 2.0 suite out of the listing when unset.
+      # Runs the KMIP 2.0 integration suite too; it skips itself when unset.
       KMIP_RUN_2_0_TESTS: 1
     steps:
       - uses: actions/checkout@v4
@@ -68,7 +67,8 @@ jobs:
             echo "::error::KMIP test environment not configured; integration tests skipped"
             exit 1
           fi
-          if ! grep -q 'KmipClientIntegrationTest20\.' "$log"; then
+          # 2.0 tests are logged even when skipped: require some that passed.
+          if ! grep -qF '[       OK ] KmipClientIntegrationTest20.' "$log"; then
             echo "::error::KMIP 2.0 test suite did not run"
             exit 1
           fi

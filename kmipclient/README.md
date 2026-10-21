@@ -803,8 +803,8 @@ ctest --output-on-failure
 ./kmipclient/kmipclient_test
 ```
 
-When `KMIP_RUN_2_0_TESTS` is not set to `1`, the KMIP 2.0 integration suite
-is excluded via GoogleTest filter (`-KmipClientIntegrationTest20.*`).
+When `KMIP_RUN_2_0_TESTS` is not set to `1`, the KMIP 2.0 integration tests
+are skipped (GoogleTest reports them as `SKIPPED`).
 
 The KMIP 1.4 integration suite includes enabled tests for:
 
