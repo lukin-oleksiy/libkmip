@@ -5,6 +5,10 @@
  * repository for more information.
  */
 
+// The checks in this file are assert()s; keep them in Release builds, which
+// CI runs, rather than compiling them out.
+#undef NDEBUG
+
 #include "kmipcore/attributes_parser.hpp"
 #include "kmipcore/key_parser.hpp"
 #include "kmipcore/kmip_attribute_names.hpp"

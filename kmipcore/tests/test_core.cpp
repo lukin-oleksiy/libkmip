@@ -5,6 +5,10 @@
  * repository for more information.
  */
 
+// The checks in this file are assert()s; keep them in Release builds, which
+// CI runs, rather than compiling them out.
+#undef NDEBUG
+
 #include <algorithm>
 #include <cassert>
 #include <iostream>
